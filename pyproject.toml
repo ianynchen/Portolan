@@ -1,0 +1,11 @@
+# Portolan workspace root.
+#
+# Virtual root: this file defines the workspace and shared tool config only;
+# it is not itself a distributable package. Per ARCHITECTURE §18.7 the repo is
+# one monorepo with independently buildable packages and ONE lockfile.
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv]
+required-version = ">=0.5"

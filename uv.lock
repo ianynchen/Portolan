@@ -1,0 +1,65 @@
+version = 1
+revision = 3
+requires-python = ">=3.11"
+
+[manifest]
+members = [
+    "portolan-contract",
+    "portolan-core",
+    "portolan-extractor",
+    "portolan-router",
+    "portolan-watch",
+]
+
+[[package]]
+name = "portolan-contract"
+version = "0.0.0"
+source = { editable = "packages/portolan-contract" }
+
+[[package]]
+name = "portolan-core"
+version = "0.0.0"
+source = { editable = "packages/portolan-core" }
+dependencies = [
+    { name = "portolan-contract" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "portolan-contract", editable = "packages/portolan-contract" }]
+
+[[package]]
+name = "portolan-extractor"
+version = "0.0.0"
+source = { editable = "packages/portolan-extractor" }
+dependencies = [
+    { name = "portolan-contract" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "portolan-contract", editable = "packages/portolan-contract" }]
+
+[[package]]
+name = "portolan-router"
+version = "0.0.0"
+source = { editable = "packages/portolan-router" }
+dependencies = [
+    { name = "portolan-contract" },
+    { name = "portolan-core" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "portolan-contract", editable = "packages/portolan-contract" },
+    { name = "portolan-core", editable = "packages/portolan-core" },
+]
+
+[[package]]
+name = "portolan-watch"
+version = "0.0.0"
+source = { editable = "packages/portolan-watch" }
+dependencies = [
+    { name = "portolan-extractor" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "portolan-extractor", editable = "packages/portolan-extractor" }]

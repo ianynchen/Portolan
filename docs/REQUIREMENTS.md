@@ -113,6 +113,13 @@ Requirement keywords follow RFC 2119 (MUST / SHOULD / MAY).
   relationship instance MUST conform to a declared type, and each type MAY
   declare constraints (permitted endpoint types, required attributes, whether the
   relationship is temporal).
+- **FR-1.3a** Declarable relationship constraints MUST additionally cover:
+  whether both endpoints must belong to the same entity category; whether the
+  relationship is irreflexive; whether it is asymmetric; and which other
+  relationship types it is mutually exclusive with. These MUST be enforced by
+  the system of record on write (NFR-3.2), not by extraction convention, since
+  the extractor emits unresolved mentions and cannot know an endpoint's type at
+  the time it reports the relationship.
 - **FR-1.4** The vocabulary MUST be self-describing: each type MUST carry a
   human/agent-readable description, and the full vocabulary MUST be queryable so
   that agents can discover it before composing queries. Descriptions MUST state
@@ -166,8 +173,10 @@ Requirement keywords follow RFC 2119 (MUST / SHOULD / MAY).
   stable identity, content fingerprint, and ingestion timestamp.
 - **FR-3.2** The system MUST decompose documents into their section structure,
   including arbitrarily nested sections, and represent documents and sections as
-  first-class entities in the graph with their containment hierarchy, ordering,
-  section paths/numbers, and headings.
+  first-class, individually addressable entities carrying their hierarchy,
+  ordering, section paths/numbers, and headings. Retrieving a document's
+  complete section tree MUST be a single bounded operation. (How the hierarchy
+  is stored is a design decision; it need not be a relationship.)
 - **FR-3.3** Structural decomposition MUST be deterministic (parser-based, not
   model-based) and MUST NOT require human review.
 - **FR-3.4** Relationships MUST be assertable at either document level or section
@@ -353,7 +362,10 @@ Requirement keywords follow RFC 2119 (MUST / SHOULD / MAY).
 - **FR-8.8** Search results whose subject is superseded as of the query date MUST
   be shown with their supersession context rather than hidden.
 - **FR-8.9** Retrieval relevance SHOULD weight "substantially about" links above
-  "mentioned in passing" links.
+  "mentioned in passing" links. *(Deferred in v1: the vocabulary distinguishes
+  "defines" from "mentions" rather than "is about" from "mentions", so this
+  ranking input is unavailable until a substantially-about link type is
+  admitted on evidence. See decision 0002.)*
 - **FR-8.10** Search MUST cover image-derived text (captions, descriptions, OCR)
   as a retrieval signal; image matches MUST resolve to their owning section,
   with the matching image identifiable in the result. Image-similarity search

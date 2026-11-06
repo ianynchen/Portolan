@@ -16,7 +16,7 @@ A single-database design for a knowledge base that:
    - 2 participants → binary edge with properties (`edge` row)
    - 3+ participants, or a relation that participates in further relations → **hub node** (a `node` whose kind is flagged `is_relation`)
 2. **Schema-as-data.** Relationship and node vocabularies live in catalog tables (`rel_type`, `node_kind`), not DDL. New type = one INSERT, no migration. Catalogs carry natural-language descriptions so agent prompts can be generated from them and never drift from the database.
-3. **Graph-ness is orthogonal to kind.** "B is an assembly" (domain type) and "B contains a subgraph" (structure) are separate facts — `kind` stays a domain type; containment/scoping is expressed by `CONTAINS` edges and `edge.graph_id`.
+3. **Graph-ness is orthogonal to kind.** "B is an assembly" (domain type) and "B contains a subgraph" (structure) are separate facts — `kind` stays a domain type; subgraph scoping is expressed by `edge.graph_id`. Document structure is neither: it is a parser-produced tree living in columns on the section node (§3, decision 0002).
 4. **Temporal states are explicit and distinct:**
    - `validity IS NULL` — fact is not temporal (timeless)
    - `daterange(start, NULL)` — started, end unknown (open-ended)
@@ -46,8 +46,9 @@ Agents can `SELECT` these to learn the vocabulary before composing queries.
 ```sql
 CREATE TABLE node_kind (
     name         text PRIMARY KEY,
+    category     text NOT NULL,                    -- 'artifact' | 'subject' (decision 0002)
     is_relation  boolean NOT NULL DEFAULT false,  -- true = hub node (n-ary relation/event)
-    is_container boolean NOT NULL DEFAULT false,  -- true = may scope subgraphs / CONTAINS
+    is_container boolean NOT NULL DEFAULT false,  -- true = may scope subgraphs (graph_id)
     props_schema jsonb,                           -- optional JSON Schema for node.props
     description  text NOT NULL                    -- FOR AGENTS: what this kind means
 );
@@ -56,7 +57,10 @@ CREATE TABLE rel_type (
     name         text PRIMARY KEY,
     src_kinds    text[],                          -- allowed source kinds; NULL = any
     dst_kinds    text[],                          -- allowed destination kinds; NULL = any
+    same_category boolean NOT NULL DEFAULT false, -- both endpoints must share node_kind.category
     is_temporal  boolean NOT NULL DEFAULT false,  -- if true, edges should carry validity
+    is_irreflexive boolean NOT NULL DEFAULT true, -- reject src = dst
+    is_asymmetric  boolean NOT NULL DEFAULT false,-- reject B->A when A->B exists
     props_schema jsonb,                           -- optional JSON Schema for edge.props
     description  text NOT NULL                    -- FOR AGENTS: semantics + direction convention
 );
@@ -72,7 +76,25 @@ CREATE TABLE hub_role (
     max_count int,                        -- NULL = unbounded
     PRIMARY KEY (hub_kind, rel_type)
 );
+
+-- Mutually exclusive relationship types: one ordered pair of nodes may not
+-- carry both. The OWL owl:propertyDisjointWith characteristic, enforced.
+CREATE TABLE rel_disjoint (
+    rel_type_a text NOT NULL REFERENCES rel_type(name),
+    rel_type_b text NOT NULL REFERENCES rel_type(name),
+    PRIMARY KEY (rel_type_a, rel_type_b),
+    CHECK (rel_type_a < rel_type_b)
+);
 ```
+
+**Constraint columns come from OWL, deliberately narrowly.** `is_irreflexive`,
+`is_asymmetric`, and `rel_disjoint` are the only three OWL object-property
+characteristics that *constrain*; `Functional`, `InverseFunctional`,
+`Transitive`, `Symmetric` and `Reflexive` all *infer* new facts and are not
+used. `rdfs:domain`/`rdfs:range` are likewise inference axioms, not constraints
+— under OWL semantics an out-of-domain edge reclassifies its endpoint rather
+than being rejected. `src_kinds`/`dst_kinds`/`same_category` therefore carry
+closed-world SHACL semantics, not OWL semantics. See decision 0002.
 
 `hub_role` pays four times: (1) the validation trigger (§7) enforces hub
 completeness at promotion — "a delivery has exactly one supplier" becomes a
@@ -86,9 +108,9 @@ form with labeled slots rather than a bag of edges.
 questions — *what belongs here*, and *what does NOT belong here versus the
 neighboring types it could be confused with*. Extraction prompts are generated
 from these descriptions (§14.4), so the negative half directly reduces LLM
-confusion between adjacent types. Example: `DESCRIBES: the section is
-substantially about dst. NOT for passing references (use MENTIONS); NOT for
-functional replacement (use REPLACES).` This MECE-style discipline is the
+confusion between adjacent types. Example: `DEFINES: src establishes what dst
+is. NOT for text that merely refers to the entity (use MENTIONS); NOT between
+two artifacts.` This MECE-style discipline is the
 single cheapest extraction-precision lever in the system.
 
 **Property-name reuse across kinds.** When designing `props_schema`, prefer
@@ -97,32 +119,55 @@ books, films, and podcasts makes "everything sci-fi" a natural cross-kind
 query; three near-synonyms make it impossible. A standing check at every
 low-level design review, alongside the §19.6 jsonb graduation test.
 
-**Usage — seeding a vocabulary:**
+**The v1 vocabulary (decision 0002).** Three kinds in two categories, four
+relationship types. `entity` is deliberately one opaque kind; specialisation
+into `component`, `person` and the like happens through §14.4's four-outcome
+loop when a query needs to pivot on the distinction, not in advance.
 
 ```sql
-INSERT INTO node_kind (name, is_relation, is_container, description) VALUES
-  ('component',   false, false, 'An atomic part or document section'),
-  ('assembly',    false, true,  'A composite unit; may contain components and scope a subgraph'),
-  ('document',    false, false, 'A source document node (distinct from provenance.document)'),
-  ('delivery',    true,  false, 'HUB NODE: an n-ary delivery event linking supplier, product, destination, contract'),
-  ('supersession',true,  false, 'HUB NODE: a supersession event, used when the supersession itself must be referenced');
+INSERT INTO node_kind (name, category, description) VALUES
+  ('document', 'artifact',
+   'A whole source document. NOT one of its sections (use section); NOT a thing the document is about (use entity).'),
+  ('section',  'artifact',
+   'A section of a document at any nesting depth; the unit relationships usually target. NOT the document as a whole (use document).'),
+  ('entity',   'subject',
+   'A thing the documents are about, identified across documents. NOT a document or section (those are artifacts); NOT a statement made about a thing.');
 
-INSERT INTO rel_type (name, src_kinds, dst_kinds, is_temporal, description) VALUES
-  ('CONTAINS',      ARRAY['assembly'], NULL,  false, 'src (container) contains dst as a member. Direction: container -> member.'),
-  ('SUPPLEMENT_OF', NULL, NULL,               false, 'src supplements dst. Direction: supplement -> base.'),
-  ('SUPERSEDES',    NULL, NULL,               true,  'src supersedes dst during validity. Direction: superseder -> superseded. At most one open/overlapping supersession per dst (enforced).'),
-  ('HAS_SUPPLIER',  ARRAY['delivery'], NULL,  false, 'Hub-node role edge: delivery -> supplier.'),
-  ('HAS_PRODUCT',   ARRAY['delivery'], NULL,  false, 'Hub-node role edge: delivery -> product.'),
-  ('HAS_DESTINATION',ARRAY['delivery'], NULL, false, 'Hub-node role edge: delivery -> destination.'),
-  ('UNDER_CONTRACT',ARRAY['delivery'], NULL,  false, 'Hub-node role edge: delivery -> governing contract.');
+INSERT INTO rel_type (name, src_kinds, dst_kinds, same_category, is_temporal,
+                      is_irreflexive, is_asymmetric, description) VALUES
+  ('SUPERSEDES',
+   ARRAY['document','section','entity'], ARRAY['document','section','entity'],
+   true, true, true, true,
+   'src displaces dst from a stated date. Direction: superseder -> superseded. Both endpoints share a category: an artifact displaces an artifact, an entity displaces an entity. At most one open supersession per dst (enforced). NOT for a document that adds to another without displacing it (use SUPPLEMENTS); NOT for a document reporting that one entity replaced another — that is an entity-to-entity SUPERSEDES whose source is recorded in provenance, not an edge from the document.'),
 
--- declare the delivery hub's shape
-INSERT INTO hub_role (hub_kind, rel_type, min_count, max_count) VALUES
-  ('delivery', 'HAS_SUPPLIER',    1, 1),
-  ('delivery', 'HAS_PRODUCT',     1, NULL),
-  ('delivery', 'HAS_DESTINATION', 1, 1),
-  ('delivery', 'UNDER_CONTRACT',  0, 1);
+  ('SUPPLEMENTS',
+   ARRAY['document','section','entity'], ARRAY['document','section','entity'],
+   true, false, true, true,
+   'src adds to dst without displacing it. Direction: supplement -> base. Both endpoints share a category. NOT for displacement (use SUPERSEDES); NOT for a passing reference (use MENTIONS).'),
+
+  ('DEFINES',
+   ARRAY['document','section'], ARRAY['entity'],
+   false, false, true, true,
+   'src establishes what dst is. Direction: defining text -> entity defined. NOT for text that merely refers to the entity (use MENTIONS); NOT between two artifacts.'),
+
+  ('MENTIONS',
+   ARRAY['document','section'], ARRAY['document','section','entity'],
+   false, false, true, false,
+   'src refers to dst without asserting anything about its status. Direction: referring text -> thing referred to. Covers cross-references between artifacts and passing references to entities. NOT for displacement (use SUPERSEDES); NOT for addition (use SUPPLEMENTS); NOT for establishing what something is (use DEFINES). Deliberately not asymmetric: mutual cross-references between sections are normal.');
+
+INSERT INTO rel_disjoint (rel_type_a, rel_type_b) VALUES
+  ('SUPERSEDES', 'SUPPLEMENTS');   -- one pair cannot both displace and add to
 ```
+
+**No `CONTAINS`.** Document structure is intra-document, tree-shaped and
+parser-produced, so it lives in columns on the section node (§3), not in edges.
+Decision 0002 records why, and §19.6's standing note about `document_id`,
+`path` and `ordinal` being overdue for graduation is thereby resolved.
+
+**`hub_role` has no v1 instances.** N-ary relations remain supported (FR-1.6,
+§9) and the mechanism is unchanged; this vocabulary simply does not use one yet.
+The `delivery`/`supersession` hub kinds previously seeded here were
+illustrative.
 
 ---
 
@@ -136,6 +181,15 @@ CREATE TABLE node (
     props      jsonb NOT NULL DEFAULT '{}',
     validity   daterange,               -- entity-level temporality (NULL = timeless)
     -- geom    geometry,                -- uncomment with PostGIS when spatial arrives
+    -- document structure (kind='section' only; NULL elsewhere) — decision 0002.
+    -- The section tree is parser-produced, intra-document and tree-shaped, so it
+    -- is columns rather than edges. This is §19.6's graduation, applied.
+    document_id       bigint REFERENCES node(id),  -- owning document node
+    parent_section_id bigint REFERENCES node(id),  -- NULL = top-level section
+    ordinal           int,                         -- order among siblings
+    path              int[],                       -- sort key, e.g. {3,2,1}
+    path_label        text,                        -- display form, e.g. '3.2.1'
+    heading           text,                        -- section heading as written
     -- retrieval columns:
     summary    text,                    -- 1-3 sentence description; the embedding source
     embedding  vector(1536),            -- pgvector; dimension matches your embedding model
@@ -261,6 +315,12 @@ humans and agents has four recurring query shapes; each gets its index.
 CREATE INDEX node_embedding_idx ON node USING hnsw (embedding vector_cosine_ops);
 CREATE INDEX node_tsv_idx       ON node USING gin (tsv);
 CREATE INDEX node_kind_name_idx ON node (kind, name);
+
+-- Document structure (decision 0002): one index serves the whole-tree render
+-- (`WHERE document_id = :d ORDER BY path`) and child lookup. Partial, so it
+-- carries only section rows.
+CREATE INDEX node_section_tree_idx ON node (document_id, path)
+    WHERE document_id IS NOT NULL;
 ```
 
 Hybrid entry = pgvector top-k UNION full-text match, fused (see `kb_search`, §8).
@@ -321,12 +381,13 @@ ALTER TABLE edge ADD CONSTRAINT no_overlapping_supersession
 -- DEFERRABLE allows SET CONSTRAINTS ... DEFERRED inside transactions that must
 -- transiently overlap (close-then-assert patterns).
 
--- SUPPLEMENT_OF is at most one per (src, dst) pair
+-- SUPPLEMENTS is at most one per (src, dst) pair
 CREATE UNIQUE INDEX one_supplement ON edge (src, dst)
-    WHERE rel_type = 'SUPPLEMENT_OF';
+    WHERE rel_type = 'SUPPLEMENTS';
 
--- No self-loops unless you want them
-ALTER TABLE edge ADD CONSTRAINT no_self_loop CHECK (src <> dst);
+-- Self-loops are rejected per rel_type via rel_type.is_irreflexive (§7 trigger),
+-- which defaults true. A blanket CHECK would prevent ever admitting a
+-- legitimately reflexive type.
 ```
 
 ### Catalog-driven trigger (one trigger, data-driven — not per-type trigger sprawl)
@@ -336,20 +397,54 @@ CREATE FUNCTION edge_validate() RETURNS trigger AS $$
 DECLARE
     rt rel_type%ROWTYPE;
     s_kind text; d_kind text; g_container boolean;
+    s_cat  text; d_cat  text;
 BEGIN
     SELECT * INTO rt FROM rel_type WHERE name = NEW.rel_type;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'unknown rel_type %', NEW.rel_type;
     END IF;
 
-    SELECT kind INTO s_kind FROM node WHERE id = NEW.src;
-    SELECT kind INTO d_kind FROM node WHERE id = NEW.dst;
+    SELECT n.kind, nk.category INTO s_kind, s_cat
+      FROM node n JOIN node_kind nk ON nk.name = n.kind WHERE n.id = NEW.src;
+    SELECT n.kind, nk.category INTO d_kind, d_cat
+      FROM node n JOIN node_kind nk ON nk.name = n.kind WHERE n.id = NEW.dst;
 
     IF rt.src_kinds IS NOT NULL AND NOT (s_kind = ANY(rt.src_kinds)) THEN
         RAISE EXCEPTION 'rel_type % does not allow source kind %', NEW.rel_type, s_kind;
     END IF;
     IF rt.dst_kinds IS NOT NULL AND NOT (d_kind = ANY(rt.dst_kinds)) THEN
         RAISE EXCEPTION 'rel_type % does not allow destination kind %', NEW.rel_type, d_kind;
+    END IF;
+
+    -- Same-category pairing (decision 0002): src_kinds/dst_kinds compute a
+    -- cartesian product and cannot express "artifact->artifact OR entity->entity".
+    IF rt.same_category AND s_cat IS DISTINCT FROM d_cat THEN
+        RAISE EXCEPTION 'rel_type % requires both endpoints in one category (got % and %)',
+            NEW.rel_type, s_cat, d_cat;
+    END IF;
+
+    -- OWL Irreflexive / Asymmetric, the two per-edge constraint characteristics.
+    IF rt.is_irreflexive AND NEW.src = NEW.dst THEN
+        RAISE EXCEPTION 'rel_type % is irreflexive; src = dst = %', NEW.rel_type, NEW.src;
+    END IF;
+
+    IF rt.is_asymmetric AND EXISTS (
+        SELECT 1 FROM edge e
+        WHERE e.rel_type = NEW.rel_type AND e.src = NEW.dst AND e.dst = NEW.src
+    ) THEN
+        RAISE EXCEPTION 'rel_type % is asymmetric; the converse edge % -> % exists',
+            NEW.rel_type, NEW.dst, NEW.src;
+    END IF;
+
+    -- OWL propertyDisjointWith: one ordered pair may not carry both types.
+    IF EXISTS (
+        SELECT 1 FROM edge e JOIN rel_disjoint d
+          ON (d.rel_type_a = NEW.rel_type AND d.rel_type_b = e.rel_type)
+          OR (d.rel_type_b = NEW.rel_type AND d.rel_type_a = e.rel_type)
+        WHERE e.src = NEW.src AND e.dst = NEW.dst
+    ) THEN
+        RAISE EXCEPTION 'rel_type % is disjoint with an existing edge between % and %',
+            NEW.rel_type, NEW.src, NEW.dst;
     END IF;
 
     IF rt.is_temporal AND NEW.validity IS NULL THEN
@@ -386,7 +481,8 @@ sufficient, since hubs are only created through it.
 
 ### Accepted looseness (be deliberate about the bucket)
 
-Graph-global invariants (e.g. "CONTAINS must be acyclic") don't fit row-level
+Graph-global invariants (e.g. "a transitive relationship must be acyclic, and
+`parent_section_id` must not cycle") don't fit row-level
 constraints. Options: deferred trigger running a recursive check, application-side
 check, or a periodic integrity job. Choose per invariant and document the choice.
 
@@ -437,7 +533,7 @@ transaction.
 ```sql
 CREATE FUNCTION kb_descendants(
     root      bigint,
-    rel       text DEFAULT 'CONTAINS',
+    rel       text,                   -- required; no default since CONTAINS was removed
     max_depth int  DEFAULT 10
 ) RETURNS TABLE (id bigint, depth int) AS $$
     WITH RECURSIVE members AS (
@@ -568,7 +664,7 @@ is needed at the storage layer.
 | Structure               | Representation                                                        |
 |-------------------------|-----------------------------------------------------------------------|
 | AutoModel               | `node` row (kind + props)                                             |
-| AutoList                | `node` rows + ordering (`ordinal` in edge props on CONTAINS, or props) |
+| AutoList                | `node` rows + ordering (`ordinal` column for sections; edge props otherwise) |
 | AutoSet                 | `node` rows + partial unique index on the natural key                 |
 | AutoGraph               | `node` + `edge`                                                       |
 | AutoHypergraph          | **hub node** (`node_kind.is_relation = true`) + role-typed edges      |
@@ -605,6 +701,11 @@ participate in further relations.**
 
 ### Nested graphs — worked example
 
+*Illustrative: uses a hypothetical extended vocabulary (`component`, `assembly`,
+`CONTAINS`, `CONNECTED_TO`) to show the mechanism. The v1 vocabulary (§2,
+decision 0002) contains none of these — nested graphs remain supported (FR-1.8)
+but are not exercised by v1's four relationship types.*
+
 "A is a supplement of B; B is itself a graph containing B1 and B2 (which are
 interconnected); A supersedes B1 from 2024-01-01, end unknown":
 
@@ -627,7 +728,7 @@ INSERT INTO edge (src, dst, rel_type, graph_id) VALUES
 
 -- top-level statements about B and its members
 INSERT INTO edge (src, dst, rel_type) VALUES
-    (1, 2, 'SUPPLEMENT_OF');
+    (1, 2, 'SUPPLEMENTS');
 INSERT INTO edge (src, dst, rel_type, validity) VALUES
     (1, 3, 'SUPERSEDES', daterange('2024-01-01', NULL));  -- open-ended
 ```
@@ -759,11 +860,13 @@ WHERE e.rel_type = 'SUPERSEDES'
 
 ### Q4 — Multi-relation join: who supersedes B1 AND supplements B1's container?
 
+*Illustrative, using the same hypothetical `CONTAINS` vocabulary as §9.*
+
 ```sql
 SELECT a.id, a.name, s.validity
 FROM edge s
-JOIN edge c   ON c.rel_type = 'CONTAINS'       AND c.dst = s.dst
-JOIN edge sup ON sup.rel_type = 'SUPPLEMENT_OF' AND sup.src = s.src
+JOIN edge c   ON c.rel_type = 'CONTAINS'      AND c.dst = s.dst
+JOIN edge sup ON sup.rel_type = 'SUPPLEMENTS' AND sup.src = s.src
              AND sup.dst = c.src
 JOIN node a   ON a.id = s.src
 WHERE s.rel_type = 'SUPERSEDES'
@@ -771,14 +874,32 @@ WHERE s.rel_type = 'SUPERSEDES'
   AND s.validity @> CURRENT_DATE;
 ```
 
-### Q5 — Transitive containment: everything inside B, any depth
+### Q5 — A document's section tree, any depth
+
+Structure is columns (§3, decision 0002), so the whole tree is one indexed range
+scan with no recursion — `path` already encodes the hierarchy:
 
 ```sql
-SELECT n.id, n.kind, n.name, m.depth
-FROM kb_descendants(:b_id, 'CONTAINS', 10) m
-JOIN node n ON n.id = m.id
-ORDER BY m.depth, n.name;
+SELECT id, path_label, heading, ordinal
+FROM node
+WHERE document_id = :doc_id
+ORDER BY path;
 ```
+
+A subtree below one section, when the whole document is too much:
+
+```sql
+WITH RECURSIVE sub AS (
+    SELECT id, path, heading, 0 AS depth FROM node WHERE id = :section_id
+    UNION ALL
+    SELECT n.id, n.path, n.heading, sub.depth + 1
+    FROM node n JOIN sub ON n.parent_section_id = sub.id
+)
+SELECT * FROM sub ORDER BY path;
+```
+
+`kb_descendants` remains available for transitive expansion over any *edge*
+relationship, should the vocabulary ever admit one.
 
 ### Q6 — Materialize a named graph: B's internal structure
 
@@ -833,7 +954,7 @@ WHERE e.dst = :x_id
   never raw SQL.
 
 **Defer until evidence demands:**
-- **Closure table** for deep CONTAINS hierarchies: trigger-maintained
+- **Closure table** for deep section or transitive hierarchies: trigger-maintained
   `(ancestor, descendant, depth)`; swap into `kb_descendants` body when recursive
   CTEs appear in slow-query logs. Callers unchanged.
 - **PostGIS**: a nullable `geom` column is a cheap later migration.
@@ -1042,8 +1163,8 @@ node in the graph or typed a query, the result is a focus section + its rendered
 neighborhood, and traversal proceeds identically. Two UX rules worth enforcing:
 
 - **Full-text hits land on section nodes** — exactly the right graph entry point
-  (user lands on §3.2, sees its supersession edges, traverses up to the document
-  via CONTAINS).
+  (user lands on §3.2, sees its supersession edges, and reaches the document
+  through `section.document_id`).
 - **Superseded results explain themselves rather than hide.** If a hit's node is
   superseded as of the browsing date, show it with the supersession edge rendered
   ("§3.2 — superseded by Bulletin D2 since 2024-01-01"). Search results that
@@ -1152,20 +1273,27 @@ sentence) a human can verify in seconds.
 
 | Layer | Content | Mechanism | Trust |
 |-------|---------|-----------|-------|
-| 1. Section tree | document + section nodes, CONTAINS hierarchy | deterministic parser | direct to real tables, no review |
-| 2. Domain entities | components, assemblies... + DESCRIBES/MENTIONS links | LLM extraction + identity resolution | staged; provisional entities always reviewed |
-| 3. Relations | SUPERSEDES, SUPPLEMENT_OF, REPLACES... | LLM extraction + reference resolution | staged; gated promotion |
+| 1. Section tree | document + section nodes, hierarchy in columns (§3) | deterministic parser | direct to real tables, no review |
+| 2. Domain entities | `entity` nodes + DEFINES/MENTIONS links | LLM extraction + identity resolution | staged; provisional entities always reviewed |
+| 3. Relations | SUPERSEDES, SUPPLEMENTS | LLM extraction + reference resolution | staged; gated promotion |
 
 ### 14.1 Layer 1 — the section tree (deterministic, LLM-free)
 
-Sections are nodes, **including nested sections** — the structural pass produces a
-tree of CONTAINS edges:
+Sections are nodes, **including nested sections**. The hierarchy is
+intra-document, tree-shaped and parser-produced, so it lives in **columns on the
+section node** (§3), not in edges — decision 0002:
 
 ```
-(doc SB-102) -[:CONTAINS {ordinal:3, path:"3",     heading:"Maintenance"}]->      (§3)
-(§3)         -[:CONTAINS {ordinal:2, path:"3.2",   heading:"Seal Replacement"}]-> (§3.2)
-(§3.2)       -[:CONTAINS {ordinal:1, path:"3.2.1", heading:"Torque Specs"}]->     (§3.2.1)
+node(kind='section', heading='Maintenance',      document_id=SB-102, parent_section_id=NULL,   ordinal=3, path={3},     path_label='3')
+node(kind='section', heading='Seal Replacement', document_id=SB-102, parent_section_id=§3,     ordinal=2, path={3,2},   path_label='3.2')
+node(kind='section', heading='Torque Specs',     document_id=SB-102, parent_section_id=§3.2,   ordinal=1, path={3,2,1}, path_label='3.2.1')
 ```
+
+Rendering a document's whole tree is therefore one indexed range scan
+(`WHERE document_id = :d ORDER BY path`) with no recursion: `path` already
+encodes the hierarchy, and storing it as `int[]` sorts correctly where a text
+path would put "10" before "2". A section subtree is a recursive CTE over
+`parent_section_id`, to which §12's closure-table optimisation still applies.
 
 - Parsing is a parser's job — never the LLM's. Stage-1 is a **format router**
   with **Docling as the primary parser** (it covers PDF, DOCX, PPTX, XLSX,
@@ -1238,22 +1366,24 @@ tree of CONTAINS edges:
 
   Deterministic output writes **directly to the real tables**, bypassing
   staging: don't burn review capacity on "does §3.2 exist."
-- Each section node gets: `name` (heading), `props.path` / `ordinal`, a
-  `node_content` row (body text, language detection, content hash), chunks +
-  embeddings (§13), and provenance spans against the source file.
+- Each section node gets: `heading`, `document_id`, `parent_section_id`,
+  `ordinal`, `path`/`path_label` (all real columns, §3), a `node_content` row
+  (body text, language detection, content hash), chunks + embeddings (§13), and
+  provenance spans against the source file.
 - The one LLM touch in this layer: the canonical-English `summary` per section —
   cheap, and what makes section nodes legible in the graph UI.
-- **Placement decision:** the section tree lives in the *default graph*
-  (`graph_id IS NULL`) — CONTAINS hierarchy is top-level knowledge everyone
-  traverses. Intra-document cross-references ("see §4.1"), if extracted later, are
-  good `graph_id` candidates instead.
+- **Placement decision:** because the tree is columns, it is outside the graph
+  entirely and no `graph_id` question arises for it. Every `edge` row is
+  therefore an asserted fact that a human approved or a threshold auto-approved,
+  which keeps §6's covering indexes free of one structural row per section and
+  stops `kb_search`'s untyped expansion surfacing sibling sections as findings.
+  Intra-document cross-references ("see §4.1") are `MENTIONS` edges, and remain
+  good `graph_id` candidates if they are ever scoped.
 
 Catalog additions:
 
 ```sql
-INSERT INTO node_kind (name, is_container, description) VALUES
-  ('document', true,  'A whole source document; container of sections'),
-  ('section',  false, 'A section of a document; the unit relationships usually target');
+-- document/section/entity are seeded in §2 as the v1 vocabulary (decision 0002).
 
 -- reconcile the two document concepts: provenance file vs. knowledge node
 ALTER TABLE document ADD COLUMN node_id bigint REFERENCES node(id);
@@ -1275,23 +1405,25 @@ SELECT
     e.validity,
     e.id         AS underlying_edge,
     dst_sec.id   AS via_section,
-    dst_c.props->>'path' AS section_path,
+    dst_sec.path_label AS section_path,
     (dst_sec.id IS NULL) AS whole_document
 FROM edge e
 JOIN node src_any ON src_any.id = e.src
-LEFT JOIN edge src_c  ON src_c.rel_type = 'CONTAINS' AND src_c.dst = e.src
-JOIN node src_doc ON src_doc.id = coalesce(src_c.src, e.src)
+JOIN node src_doc ON src_doc.id = coalesce(src_any.document_id, e.src)
                  AND src_doc.kind = 'document'
-LEFT JOIN edge dst_c  ON dst_c.rel_type = 'CONTAINS' AND dst_c.dst = e.dst
+JOIN node dst_any ON dst_any.id = e.dst
 LEFT JOIN node dst_sec ON dst_sec.id = e.dst AND dst_sec.kind = 'section'
-JOIN node dst_doc ON dst_doc.id = coalesce(dst_c.src, e.dst)
+JOIN node dst_doc ON dst_doc.id = coalesce(dst_any.document_id, e.dst)
                  AND dst_doc.kind = 'document'
-WHERE e.rel_type IN ('SUPERSEDES', 'SUPPLEMENT_OF');
+WHERE e.rel_type IN ('SUPERSEDES', 'SUPPLEMENTS');
 ```
 
 The document browser renders "D2 supersedes D1 *(partially: §3.2)*" from this view;
 `whole_document` distinguishes full from partial; `via_section` is the drill-down.
-Derived-not-stored means it can never contradict section-level truth. Note:
+Derived-not-stored means it can never contradict section-level truth. With
+structure in columns (decision 0002) the two self-joins through `CONTAINS` that
+this view previously needed collapse into `coalesce(node.document_id, e.src)`.
+Note:
 "document *effectively* superseded" (all sections individually superseded) is a
 judgment, not an aggregation — surface "5 of 7 sections superseded" and let humans
 or agents conclude. The no-overlap exclusion constraint now operates **per
@@ -1303,28 +1435,37 @@ The things sections are *about* become nodes — **one** node per real-world ent
 regardless of how many documents mention it:
 
 ```
-(§3.2 of SB-102) -[:DESCRIBES]-> (XJ-42)
-(§1.4 of SB-107) -[:MENTIONS]->  (XJ-42)
+(§3.2 of SB-102) -[:DEFINES]->  (XJ-42)
+(§1.4 of SB-107) -[:MENTIONS]-> (XJ-42)
 (bulletin D2)    -[:SUPERSEDES {validity}]-> (§3.2 of SB-102)
 ```
 
 This is what makes agent queries like "everything about XJ-42, current as of
-today" possible: all sections across all documents that discuss the entity, each
-section's supersession status, and the entity's own REPLACES chain — in one
+today" possible: all sections across all documents that refer to the entity, each
+section's supersession status, and the entity's own supersession chain — in one
 traversal.
 
-```sql
-INSERT INTO rel_type (name, src_kinds, dst_kinds, description) VALUES
-  ('DESCRIBES', ARRAY['section'], NULL, 'The section is substantially about dst.'),
-  ('MENTIONS',  ARRAY['section'], NULL, 'The section references dst in passing.'),
-  ('REPLACES',  NULL, NULL, 'src functionally replaces dst (domain-level, distinct from document SUPERSEDES).');
+`DEFINES` and `MENTIONS` are seeded in §2 with the rest of the v1 vocabulary
+(decision 0002). Two notes on what changed and why:
 
+- **`DESCRIBES` was dropped in favour of `DEFINES`.** Where something is defined
+  is a knowledge claim with an authoritative answer that supersession can
+  change; what merely discusses something is a retrieval signal, and hybrid
+  search (§13) already serves that. Accepted cost: FR-8.9 wants "substantially
+  about" ranked above "mentioned in passing", so that ranking input is deferred.
+- **`REPLACES` was dropped**, folded into same-category `SUPERSEDES`. The
+  extractor emits mentions rather than node ids (§14.4), so it cannot know
+  whether a target resolves to a document or an entity; asking it to choose
+  between two relationship names would be asking it to predict its own
+  resolution outcome. One `SUPERSEDES` lets resolution and the trigger decide.
+
+```sql
 -- entity lifecycle for auto-created entities
 ALTER TABLE node ADD COLUMN status text NOT NULL DEFAULT 'active'
     CHECK (status IN ('active','provisional','retired'));
 ```
 
-DESCRIBES vs MENTIONS matters for retrieval ranking — weight them differently when
+DEFINES vs MENTIONS matters for retrieval ranking — weight them differently when
 expanding from entity nodes.
 
 ### 14.4 The per-section extraction contract
@@ -1344,7 +1485,7 @@ Entity kinds (generated from:
 Relationship types (generated from:
   SELECT name, description, src_kinds, dst_kinds FROM rel_type):
   - SUPERSEDES: src supersedes dst during validity. Direction: superseder -> superseded.
-  - DESCRIBES / MENTIONS / REPLACES: ...
+  - SUPPLEMENTS / DEFINES / MENTIONS: ...
 
 Rules:
 - NEVER invent identifiers. Report references EXACTLY as written (verbatim required).
@@ -1372,10 +1513,11 @@ Output schema (maps 1:1 onto `staging_node` / `staging_edge`):
      "verbatim": "supersedes SB-102 §3.2 effective 1 March 2024",
      "effective_from": "2024-03-01", "effective_to": null,
      "span": [88, 142], "confidence": 0.9},
-    {"rel_type": "REPLACES",
+    {"rel_type": "SUPERSEDES",
      "src": {"kind": "entity_ref", "ref": "e1"},
      "dst": {"kind": "entity_ref", "name": "XJ-40"},
      "verbatim": "XJ-42 replaces the discontinued XJ-40",
+     "effective_from": "2024-03-01", "effective_to": null,
      "span": [240, 277], "confidence": 0.85}
   ]
 }
@@ -1401,15 +1543,16 @@ healthy share of these rows end dismissed rather than defined.)
 ```sql
 ALTER TABLE staging_edge ADD COLUMN suggested_type text;   -- agent's proposed name
 ALTER TABLE staging_edge ADD COLUMN suggestion jsonb;      -- structured proposal:
--- {"name": "REPLACES", "direction": "replacer->replaced",
---  "src_kind_guess": "component", "dst_kind_guess": "component",
---  "is_temporal_guess": false, "rationale": "text states functional replacement"}
+-- {"name": "REQUIRES", "direction": "requirer->required",
+--  "src_kind_guess": "entity", "dst_kind_guess": "entity",
+--  "is_temporal_guess": false, "rationale": "text states a dependency, which no
+--   v1 type covers"}
 -- populated ONLY when rel_type = 'UNCLASSIFIED'
 ALTER TABLE staging_edge ADD COLUMN resolved_to text REFERENCES rel_type(name);
 ```
 
 The curation queue exposes a "recurring unclassified patterns" view, clustering
-rows by `suggested_type` (trigram-grouped, so REPLACES/REPLACED_BY cluster
+rows by `suggested_type` (trigram-grouped, so REQUIRES/REQUIRED_BY cluster
 together) with occurrence counts, document spread, and sample verbatims. The
 curator's four outcomes — MECE by design (catalog changes? × was the agent's
 framing right?):
@@ -1484,10 +1627,10 @@ auto-approve; a 0.85 extraction resolved by embedding similarity should not.
 
 **Hard floor — lifecycle-mutating relationships never auto-approve on fuzzy
 resolutions.** Rel_types that mutate an entity's lifecycle (SUPERSEDES,
-REPLACES, anything that closes validity or fires temporal integrity
+anything that closes validity or fires temporal integrity
 constraints) MUST be human-reviewed whenever either endpoint resolved at
 tier 3 (embedding) or tier 4 (LLM-ranked), regardless of score. Rationale:
-the risk is asymmetric — a wrong DESCRIBES link adds retrieval noise and
+the risk is asymmetric — a wrong MENTIONS link adds retrieval noise and
 self-heals; a wrong SUPERSEDES **falsifies history for the wrong entity**,
 closing its validity and changing every future as-of answer about it. Fuzzy
 identity × destructive semantics = human, always. This is a floor beneath
@@ -1546,7 +1689,7 @@ per rel_type inside the function as those constraints accumulate.)
 | What | Review policy |
 |------|---------------|
 | Layer 1 structure | none |
-| DESCRIBES/MENTIONS links | spot-check; auto-approve above threshold (low-harm, retrieval-redundant) |
+| DEFINES/MENTIONS links | spot-check; auto-approve above threshold (low-harm, retrieval-redundant) |
 | New provisional entities | always review (dedup) |
 | Layer 3 relations, esp. temporal/SUPERSEDES | start at 100% review; loosen per (rel_type × resolution-tier) as the queue's own accept/reject history proves precision — subject to the §14.5 hard floor: lifecycle-mutating rel_types on tier-3/4 resolutions never auto-approve |
 
@@ -1620,8 +1763,8 @@ triggers a full rebuild and the scheme is pointless.
 ### 15.2 Section reconciliation — tiered matching, ordered by strength
 
 **Ownership ruling: Portolan reconciles, not Textus.** The diff's inputs are
-Portolan's stored tree; its outputs are trusted-graph mutations (CONTAINS paths
-updated, sections retired, assertions staled, edges preserved across moves) —
+Portolan's stored tree; its outputs are trusted-graph mutations (section
+`path`/`parent_section_id` updated, sections retired, assertions staled, edges preserved across moves) —
 mutation authority belongs to the custodian, atomically with the state it
 mutates, in one implementation serving every submitter. A client *declaring*
 these mutations would let an extractor bug silently reattach edges to wrong
@@ -1642,7 +1785,7 @@ misattribution:
 
 | Tier | Match on | Meaning | Action |
 |------|----------|---------|--------|
-| 1 | content hash (any path) | moved/renumbered section | update CONTAINS `path`/`ordinal`; **keep node, edges, assertions, embeddings, chunks; zero re-extraction** |
+| 1 | content hash (any path) | moved/renumbered section | update the section row's `path`/`ordinal`/`parent_section_id`; **keep node, edges, assertions, embeddings, chunks; zero re-extraction** |
 | 2 | path + fuzzy heading, content changed | edited in place | the re-extract set (§15.3) |
 | 3 | heading/content similarity at different path | moved AND edited | match if similarity high; else remove+add and queue "possible section move" for review |
 | — | unmatched old | removed | mark node `retired` (never delete); queue |
@@ -1680,7 +1823,7 @@ For a Tier-2 changed section:
   D2's claim is asserted from D2's text. But content change at a supersession
   target is high-signal: emit a low-priority review item ("§3.2 revised; 2 inbound
   SUPERSEDES edges reference it").
-- **Entity links** (DESCRIBES/MENTIONS): recomputed with re-extraction; entity
+- **Entity links** (DEFINES/MENTIONS): recomputed with re-extraction; entity
   *nodes* untouched (XJ-42 doesn't vanish because one section stopped mentioning
   it — it loses one link).
 
@@ -2131,7 +2274,7 @@ read-only derived projection of exactly what §19.2 already permits to leave
 
 - which legs surfaced it (trigram / lexical / section-vector / chunk-vector /
   asset), each leg's rank, and the fused RRF contribution;
-- which boosts applied (heading-weight, DESCRIBES-vs-MENTIONS weighting);
+- which boosts applied (heading-weight, DEFINES-vs-MENTIONS weighting);
 - an **evidence tag** per result: why it matched (matched name, matched body
   span, semantic-only) — agents use this to calibrate confidence, humans use
   it to debug "why didn't §3.2 surface."
@@ -2565,7 +2708,7 @@ key IS the tenant); the CLI never grows a `--tenant` flag.
 ### 18.6 Reasoning-based traversal (PageIndex-style) as an agent pattern
 
 Portolan already stores the data structure PageIndex builds for long documents:
-the section tree (CONTAINS + paths + headings) with per-section canonical
+the section tree (`parent_section_id` + paths + headings) with per-section canonical
 summaries **is a hierarchical ToC index**. Reasoning-based retrieval —
 navigate the tree, read summaries, drill into the relevant section — is
 therefore an **agent behavior over the existing MCP surface, zero new
@@ -2587,33 +2730,50 @@ portolan/
 ├── pyproject.toml              # workspace root: members, shared dev deps, tool config
 ├── uv.lock                     # ONE lockfile — a principal reason for the monorepo
 ├── packages/
-│   ├── portolan-contracts/       # Pydantic models: batches, mentions, search DTOs
-│   ├── portolan-core/            # library: schema, migrations, operations, ports
-│   ├── portolan-server/          # FastAPI + MCP; depends on core
-│   ├── portolan-cli/             # dual backend (§18.5): core (local) | httpx (remote)
-│   ├── textus/                 # extraction + watcher
-│   └── compositor/             # phase 2
-├── ui/                         # separate toolchain (node/vite), own CI job
-└── docs/                       # REQUIREMENTS.md, knowledge-base-schema.md
+│   ├── portolan-contract/      # Pydantic models: batches, mentions, search DTOs
+│   ├── portolan-core/          # library: schema, migrations, operations, ports
+│   ├── portolan-router/        # REST routers + MCP tool registry; depends on core
+│   ├── portolan-extractor/     # parse, normalize, extract claims; emits mentions
+│   ├── portolan-watch/         # change detection; calls the extractor in-process
+│   ├── portolan-cli/           # NOT BUILT — dual backend (§18.5): core (local) | httpx (remote)
+│   └── compositor/             # NOT BUILT — phase 2
+├── ui/                         # NOT BUILT — separate toolchain (node/vite), own CI job
+└── docs/                       # REQUIREMENTS.md, ARCHITECTURE.md, decisions/
 ```
 
-`uv build --package portolan-core` publishes the library alone;
-`uv run --package textus pytest` tests extraction alone; CI runs per-package
-jobs, path-filtered so touching Textus does not re-run core's testcontainers
-suite.
+Entries marked NOT BUILT are specified here but absent from the repository;
+per GUIDELINES §5.3 they are proposals until they exist in code.
 
-**The dependency rule that matters more than the layout: Textus and Compositor
-MUST NOT depend on `portolan-core`.** They are API clients speaking the batch
+`portolan-extractor` and `portolan-watch` are two packages but remain **one
+deployable** (§18.1): the watcher imports the extractor and drives it
+in-process, with no queue between them. They are split so the extractor stays
+installable without connector dependencies, which the one-shot CLI path and
+re-extraction campaigns both need.
+
+**Import namespace.** Distributions are named `portolan-<name>`; the import
+path is `portolan.<name>` (`portolan.core`, `portolan.contract`). `portolan/`
+is a PEP 420 implicit namespace package, so **no package may contain
+`src/portolan/__init__.py`** — adding one shadows the namespace and breaks
+every sibling import.
+
+`uv build --package portolan-core` publishes the library alone;
+`uv run --package portolan-extractor pytest` tests extraction alone; CI runs
+per-package jobs, path-filtered so touching the extractor does not re-run
+core's testcontainers suite.
+
+**The dependency rule that matters more than the layout: the submitting
+packages — `portolan-extractor`, `portolan-watch`, and Compositor — MUST NOT
+depend on `portolan-core`.** They are API clients speaking the batch
 contract (§18.2). Importing core would silently make them second writers with
 database access, voiding custody (§18.4) the first time someone calls a core
 function "just for a lookup." What they share instead is
-**`portolan-contracts`** — the Pydantic models for batches, mentions, and search
+**`portolan-contract`** — the Pydantic models for batches, mentions, and search
 DTOs — giving type-checked contract compliance across the boundary without
 leaking implementation.
 
-Allowed dependency graph: `server → core, contracts`; `cli → core (local
-backend only), contracts, httpx`; `textus → contracts`;
-`compositor → contracts`; `core → contracts`.
+Allowed dependency graph: `router → core, contract`; `cli → core (local
+backend only), contract, httpx`; `extractor → contract`; `watch → extractor`;
+`compositor → contract`; `core → contract`.
 
 **Enforcement is tooling, not discipline.** Python will not stop a stray
 import, so the graph above is declared in **import-linter** (or an equivalent
@@ -2623,11 +2783,12 @@ Python decision (§19.5) committed to.
 
 **Why monorepo here:** contract changes land atomically with their consumers
 in one PR (versus version-bump choreography across five repos); one lockfile
-prevents core/server/CLI dependency drift; the personal profile's
+prevents core/router/CLI dependency drift; the personal profile's
 single-install story builds trivially from the workspace; and at solo/small-
 team scale with contracts still moving, separate repos buy coordination cost
-without benefit. Extraction later — if Textus needs a different team and
-cadence — stays easy *because* the dependency rule kept it a pure API client.
+without benefit. Splitting extraction out later — if it needs a different team
+and cadence — stays easy *because* the dependency rule kept it a pure API
+client.
 
 ---
 
@@ -2665,7 +2826,7 @@ Rules that make it real:
    tenant's UNCLASSIFIED ratification change every tenant's extraction
    prompt. `tenant_id` on `node_kind` / `rel_type` / `hub_role`; uniqueness
    becomes `(tenant_id, name)`; tenant creation seeds the kernel vocabulary
-   (document, section, CONTAINS, SUPERSEDES, DESCRIBES, MENTIONS, ...); each
+   (document, section, entity, SUPERSEDES, SUPPLEMENTS, DEFINES, MENTIONS); each
    tenant's vocabulary evolves independently through its own four-outcome
    loop (§14.4).
 
@@ -2850,8 +3011,10 @@ exercisable as a plain function call against a real database.
 `props` is for *incidental* attributes. A jsonb field **graduates to a real
 column** when any of: (a) it is read in a query path, (b) it is required for
 correctness, (c) it is referenced by more than one component. Already overdue
-by this test (to be resolved at low-level design): `document_id` stamped on
-section nodes; `path`/`ordinal` on CONTAINS edges. Borderline: `aliases`
+by this test: `document_id` stamped on section nodes and `path`/`ordinal` — both
+**resolved by decision 0002**, which promoted them to real columns on `node`
+alongside `parent_section_id` and removed the CONTAINS edge entirely.
+Borderline: `aliases`
 (text[] column or alias table). Legitimately jsonb: `suggestion`,
 `motivated_by`, `merged_into`, incidental domain attributes. The judgment has
 an owner: every low-level design review re-runs this test over current jsonb
@@ -2944,8 +3107,8 @@ Local profile: identical steps, in-process calls, shared-directory store.
 1. Extensions (§1, §13.2: vector, btree_gist, unaccent, pg_trgm)
 2. Text search configurations: `english_ua`, `french_ua` (§13.2)
 3. Catalogs: `node_kind`, `rel_type` (incl. `origin`/`motivated_by` §14.4),
-   `hub_role` (§2), + document/section kinds and DESCRIBES/MENTIONS/REPLACES
-   rel_types (§14.1, §14.3)
+   `hub_role`, `rel_disjoint` (§2); v1 vocabulary = document/section/entity
+   kinds + SUPERSEDES/SUPPLEMENTS/DEFINES/MENTIONS (decision 0002)
 4. Core: `node` (incl. `status`, §14.3), `edge` (§3)
 5. Provenance: `document` (incl. `node_id` §14.1, `structure_hash`/`last_checked`
    §15.1), `assertion` (incl. `section_node_id` §15.3, `asset_id` §14.7,

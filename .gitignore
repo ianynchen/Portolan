@@ -3,3 +3,16 @@
 !CLAUDE.md
 
 **/*.bak
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+dist/
+build/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+# NOTE: uv.lock is deliberately NOT ignored — ARCHITECTURE §18.7 makes the
+# single committed lockfile a principal reason for the monorepo.
