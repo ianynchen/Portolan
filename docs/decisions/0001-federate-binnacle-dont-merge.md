@@ -1,3 +1,12 @@
+---
+id: "0001"
+title: "Federate Binnacle and Portolan under one ontology — do not merge them"
+status: superseded
+date: 2026-09-05
+deciders: [human:ianynchen]
+superseded_by: ["FLEET-0001"]
+---
+
 # Decision 0001: Federate Binnacle and Portolan under one ontology — do not merge them
 
 - **Status:** superseded by [FLEET-0001](FLEET-0001-one-store-and-the-naming-scheme.md)

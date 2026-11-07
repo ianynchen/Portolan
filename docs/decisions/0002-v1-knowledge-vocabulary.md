@@ -1,3 +1,15 @@
+---
+id: "0002"
+title: "v1 knowledge vocabulary — three kinds, four relationships, structure as columns"
+status: accepted
+date: 2026-09-10
+deciders: [human:ianynchen]
+supersedes:
+  - {id: "0001", part: "inclusion of Claim in the v1 object set"}
+cites:
+  - id: "meridian:DEC-0001"
+---
+
 # Decision 0002: v1 knowledge vocabulary — three kinds, four relationships, structure as columns
 
 - **Status:** accepted; **partially replaced** by [FLEET-0001](FLEET-0001-one-store-and-the-naming-scheme.md)

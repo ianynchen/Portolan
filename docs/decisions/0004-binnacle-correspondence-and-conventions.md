@@ -1,3 +1,14 @@
+---
+id: "0004"
+title: "Portolan holds the Binnacle correspondence, and the conventions both sides implement"
+status: superseded
+date: 2026-11-06
+deciders: [human:ianynchen]
+supersedes:
+  - {id: "0001", part: "the projection expectation"}
+superseded_by: ["FLEET-0001"]
+---
+
 # Decision 0004: Portolan holds the Binnacle correspondence, and the conventions both sides implement
 
 - **Status:** superseded by [FLEET-0001](FLEET-0001-one-store-and-the-naming-scheme.md)

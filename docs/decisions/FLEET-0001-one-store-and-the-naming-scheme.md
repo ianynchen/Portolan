@@ -1,3 +1,17 @@
+---
+id: "FLEET-0001"
+title: "One store, one vocabulary, and what each thing is called"
+status: accepted
+date: 2026-11-07
+deciders: [human:ianynchen]
+supersedes:
+  - "meridian:DEC-0003"
+  - "0001"
+  - "0004"
+  - {id: "0002", part: "the ruling that `decision` is not a node kind"}
+  - {id: "binnacle:0002", part: "the ruling that the whole/partial replacement definition concerns decisions; widened to every node kind"}
+---
+
 # FLEET-0001: One store, one vocabulary, and what each thing is called
 
 - **Status:** accepted
