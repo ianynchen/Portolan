@@ -1,6 +1,9 @@
 # Decision 0004: Portolan holds the Binnacle correspondence, and the conventions both sides implement
 
-- **Status:** accepted
+- **Status:** superseded by [FLEET-0001](FLEET-0001-one-store-and-the-naming-scheme.md)
+- **Superseded:** 2026-11-07 — the correspondence table existed only to bridge two
+  stores. With one store, ids are native and `binnacle_ref_map` is unnecessary, as
+  are the shared embedding and as-of conventions it carried.
 - **Date:** 2026-11-06
 - **Deciders:** owner (ianynchen), with analysis by Claude
 - **Scope:** Portolan ↔ Binnacle identity and shared conventions. Consumes
