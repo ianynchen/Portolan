@@ -9,6 +9,7 @@ supersedes:
   - "0001"
   - "0004"
   - {id: "0002", part: "the ruling that `decision` is not a node kind"}
+  - {id: "meridian:DEC-0004", part: "rule 1's three schemas, now two"}
   - {id: "binnacle:0002", part: "the ruling that the whole/partial replacement definition concerns decisions; widened to every node kind"}
 ---
 
@@ -22,6 +23,9 @@ supersedes:
   (correspondence table and shared conventions). **Partially replaces** Portolan
   `0002` (v1 knowledge vocabulary) — the replaced ruling is "`decision` is not a node
   kind"; its three kinds, four relationship types and closed-set discipline all stand.
+  **Partially replaces** Meridian `DEC-0004` (embedded modules) — the replaced ruling is
+  rule 1's "three schemas", now two (`meridian`, `binnacle`); its six boundary rules
+  otherwise stand.
   **Partially replaces** Binnacle `ADR 0002` — the replaced ruling is "this definition
   concerns decisions"; the definition itself is widened to every node kind and otherwise
   unchanged.

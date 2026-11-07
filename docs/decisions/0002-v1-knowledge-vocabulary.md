@@ -8,6 +8,7 @@ supersedes:
   - {id: "0001", part: "inclusion of Claim in the v1 object set"}
 cites:
   - id: "meridian:DEC-0001"
+    reviewed_against: ["portolan:FLEET-0001"]
 ---
 
 # Decision 0002: v1 knowledge vocabulary — three kinds, four relationships, structure as columns
@@ -203,4 +204,6 @@ Supersedes the illustrative vocabulary seeded in ARCHITECTURE.md §2, §14.1 and
 §14.3 (`component`, `assembly`, `delivery`, `supersession`, `CONTAINS`,
 `SUPPLEMENT_OF`, `DESCRIBES`, `REPLACES`). Supersedes decision 0001's inclusion
 of `Claim` in the v1 object set; the remaining 0001 objects (Document, Section,
-Entity, the Decision projection) stand. Nothing supersedes this decision yet.
+Entity, the Decision projection) stand. Partially replaced by decision 0004, which closed the deferred `decision` category item,
+and by FLEET-0001, which replaced the ruling that `decision` is not a node kind. Nothing wholly
+supersedes this decision.

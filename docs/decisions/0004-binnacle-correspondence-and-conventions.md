@@ -6,6 +6,7 @@ date: 2026-11-06
 deciders: [human:ianynchen]
 supersedes:
   - {id: "0001", part: "the projection expectation"}
+  - {id: "0002", part: "the deferred decision-category item, now closed"}
 superseded_by: ["FLEET-0001"]
 ---
 
