@@ -1,6 +1,10 @@
 # Decision 0001: Federate Binnacle and Portolan under one ontology — do not merge them
 
-- **Status:** accepted
+- **Status:** superseded by [FLEET-0001](FLEET-0001-one-store-and-the-naming-scheme.md)
+- **Superseded:** 2026-11-07 — the federation ruling is reversed. Portolan's design is
+  built into Binnacle as one store; see FLEET-0001 for why, including that this
+  record's own defence of separation rested on a distinction (open vs closed
+  relationship vocabularies) that does not exist.
 - **Date:** 2026-09-05
 - **Deciders:** owner (ianynchen), with analysis by Claude
 - **Scope:** fleet architecture — Portolan, Binnacle; forward-looking implications for
