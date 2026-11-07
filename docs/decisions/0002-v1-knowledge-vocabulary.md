@@ -1,7 +1,7 @@
 # Decision 0002: v1 knowledge vocabulary — three kinds, four relationships, structure as columns
 
-- **Status:** accepted, amended by [FLEET-0001](FLEET-0001-one-store-and-the-naming-scheme.md)
-- **Amended:** 2026-11-07 — the three kinds and four relationship types stand, and
+- **Status:** accepted; **partially replaced** by [FLEET-0001](FLEET-0001-one-store-and-the-naming-scheme.md)
+- **Partially replaced:** 2026-11-07 — replaced ruling: "`decision` is not a node kind". — the three kinds and four relationship types stand, and
   this record's closed-set discipline is the one FLEET-0001 adopts fleet-wide. Two
   changes: `decision` joins the node kinds (answering the category question this
   record deferred), and the catalog lives in Binnacle rather than a separate store.

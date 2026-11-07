@@ -5,8 +5,16 @@
 - **Deciders:** owner (ianynchen), with analysis by Claude
 - **Scope:** fleet-wide. Supersedes Meridian `DEC-0003` (separate custody, no
   projection) and Portolan decisions `0001` (federate, don't merge) and `0004`
-  (correspondence table and shared conventions). Amends Binnacle `ADR 0002`
-  (whole and partial replacement) by widening it beyond decisions.
+  (correspondence table and shared conventions). **Partially replaces** Portolan
+  `0002` (v1 knowledge vocabulary) — the replaced ruling is "`decision` is not a node
+  kind"; its three kinds, four relationship types and closed-set discipline all stand.
+  **Partially replaces** Binnacle `ADR 0002` — the replaced ruling is "this definition
+  concerns decisions"; the definition itself is widened to every node kind and otherwise
+  unchanged.
+
+  Stated as partial replacement deliberately, and not as an "amendment": this model has
+  no such relation, and the record defining the vocabulary must be expressible in it. The
+  distinction is `ADR 0002`'s own — a ruling replaced, with the rest left in force.
 
 ## The question
 
