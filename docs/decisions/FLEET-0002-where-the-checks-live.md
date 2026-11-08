@@ -1,3 +1,11 @@
+---
+id: "FLEET-0002"
+title: "Where the coherence checks live once the store exists"
+status: accepted
+date: 2026-11-07
+deciders: [human:ianynchen]
+---
+
 # FLEET-0002: Where the coherence checks live once the store exists
 
 - **Status:** accepted

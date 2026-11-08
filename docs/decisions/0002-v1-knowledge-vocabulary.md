@@ -1,10 +1,28 @@
+---
+id: "0002"
+title: "v1 knowledge vocabulary — three kinds, four relationships, structure as columns"
+status: accepted
+date: 2026-09-10
+deciders: [human:ianynchen]
+supersedes:
+  - {id: "0001", part: "inclusion of Claim in the v1 object set"}
+cites:
+  - id: "meridian:DEC-0001"
+    reviewed_against: ["portolan:FLEET-0001"]
+---
+
 # Decision 0002: v1 knowledge vocabulary — three kinds, four relationships, structure as columns
 
-- **Status:** accepted; **partially replaced** by [FLEET-0001](FLEET-0001-one-store-and-the-naming-scheme.md)
-- **Partially replaced:** 2026-11-07 — replaced ruling: "`decision` is not a node kind". — the three kinds and four relationship types stand, and
-  this record's closed-set discipline is the one FLEET-0001 adopts fleet-wide. Two
-  changes: `decision` joins the node kinds (answering the category question this
-  record deferred), and the catalog lives in Binnacle rather than a separate store.
+- **Status:** accepted; **partially replaced** by
+  [decision 0004](0004-binnacle-correspondence-and-conventions.md) and
+  [FLEET-0001](FLEET-0001-one-store-and-the-naming-scheme.md)
+- **Partially replaced:** 2026-11-06 by decision 0004 — replaced ruling: the deferred
+  `decision`-category item, which 0004 closed by joining the artifact category to the
+  projection. 0004 is itself now superseded by FLEET-0001, so read it as history.
+- **Partially replaced:** 2026-11-07 by FLEET-0001 — replaced ruling: "`decision` is not
+  a node kind". `decision` joins the node kinds, and the catalog lives in Binnacle
+  rather than a separate store. The three kinds and four relationship types stand, and
+  this record's closed-set discipline is the one FLEET-0001 adopts fleet-wide.
 - **Date:** 2026-09-10
 - **Deciders:** owner (ianynchen), with analysis by Claude
 - **Scope:** Portolan knowledge model — node kinds, relationship types, structural
@@ -191,4 +209,6 @@ Supersedes the illustrative vocabulary seeded in ARCHITECTURE.md §2, §14.1 and
 §14.3 (`component`, `assembly`, `delivery`, `supersession`, `CONTAINS`,
 `SUPPLEMENT_OF`, `DESCRIBES`, `REPLACES`). Supersedes decision 0001's inclusion
 of `Claim` in the v1 object set; the remaining 0001 objects (Document, Section,
-Entity, the Decision projection) stand. Nothing supersedes this decision yet.
+Entity, the Decision projection) stand. Partially replaced by decision 0004, which closed the deferred `decision` category item,
+and by FLEET-0001, which replaced the ruling that `decision` is not a node kind. Nothing wholly
+supersedes this decision.

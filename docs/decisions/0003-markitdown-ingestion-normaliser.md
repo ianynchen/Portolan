@@ -1,3 +1,11 @@
+---
+id: "0003"
+title: "markitdown normalises input formats; PDF structure is not trusted"
+status: accepted
+date: 2026-10-22
+deciders: [human:ianynchen]
+---
+
 # Decision 0003: markitdown normalises input formats; PDF structure is not trusted
 
 - **Status:** accepted
