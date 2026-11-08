@@ -13,11 +13,16 @@ cites:
 
 # Decision 0002: v1 knowledge vocabulary — three kinds, four relationships, structure as columns
 
-- **Status:** accepted; **partially replaced** by [FLEET-0001](FLEET-0001-one-store-and-the-naming-scheme.md)
-- **Partially replaced:** 2026-11-07 — replaced ruling: "`decision` is not a node kind". — the three kinds and four relationship types stand, and
-  this record's closed-set discipline is the one FLEET-0001 adopts fleet-wide. Two
-  changes: `decision` joins the node kinds (answering the category question this
-  record deferred), and the catalog lives in Binnacle rather than a separate store.
+- **Status:** accepted; **partially replaced** by
+  [decision 0004](0004-binnacle-correspondence-and-conventions.md) and
+  [FLEET-0001](FLEET-0001-one-store-and-the-naming-scheme.md)
+- **Partially replaced:** 2026-11-06 by decision 0004 — replaced ruling: the deferred
+  `decision`-category item, which 0004 closed by joining the artifact category to the
+  projection. 0004 is itself now superseded by FLEET-0001, so read it as history.
+- **Partially replaced:** 2026-11-07 by FLEET-0001 — replaced ruling: "`decision` is not
+  a node kind". `decision` joins the node kinds, and the catalog lives in Binnacle
+  rather than a separate store. The three kinds and four relationship types stand, and
+  this record's closed-set discipline is the one FLEET-0001 adopts fleet-wide.
 - **Date:** 2026-09-10
 - **Deciders:** owner (ianynchen), with analysis by Claude
 - **Scope:** Portolan knowledge model — node kinds, relationship types, structural
