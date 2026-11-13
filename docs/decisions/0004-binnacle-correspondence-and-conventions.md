@@ -92,6 +92,24 @@ Binnacle `relevant(subjects=[...])` call. No string matching, no alias
 guessing, no per-entity fan-out. The mapping supplies what shared ids would
 have supplied, without the dependency.
 
+## Reasoning
+
+- **A spanning query needs a join key.** Binnacle subject refs are open strings while
+  Portolan has node ids, accumulated aliases, and entity merges. Separation left
+  unaddressed, four costs compound with use: queries that can only fan out, identity
+  drift, two supersession/temporal models drifting apart, and two incommensurable
+  embedding spaces.
+- **Node ids inside Binnacle refs point the wrong way.** Decisively, that fix points
+  authoritative data at derived data. Dependencies must point toward the stable
+  component, never away from it.
+- **The correspondence belongs in Portolan.** A correspondence between a governed
+  record and a regenerable graph is itself regenerable. Entity curation repoints the
+  mapping and leaves the decision record saying exactly what it said — the better
+  audit answer as well as the cheaper one.
+- **Binnacle stays standalone.** Binnacle does not know Portolan exists and needs no
+  code change. The mapping supplies what shared ids would have supplied, without the
+  dependency.
+
 ## Conventions both sides implement
 
 - **One embedding model and dimension.** Portolan's `node.embedding` is

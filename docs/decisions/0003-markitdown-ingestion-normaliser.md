@@ -92,6 +92,27 @@ markitdown upgrade can change the output of every file and so invalidate every h
 which triggers corpus-wide re-extraction. Upgrades are therefore deliberate, planned
 for cost, and never incidental dependency bumps.
 
+## Reasoning
+
+- **A normaliser keeps the parser simple.** Writing one parser per format
+  contradicts "the parser is deterministic and simple", and the parser needs input
+  whose heading structure it can trust, because no curator is downstream to catch a
+  bad hierarchy (FR-5.6).
+- **markitdown passed the checks that matter here.** Its output is deterministic —
+  byte-identical across repeated runs and across processes — which is a precondition
+  for section-level change detection (§19). Local conversion needs no API key and no
+  LLM, and it is a Python library, not CLI-only.
+- **Trust is per format because fidelity is per format.** HTML and DOCX headings map
+  correctly; PPTX and XLSX give synthetic structure only; PDF gives no headings at
+  all. A fabricated hierarchy is worse than none, because FR-5.6 sends it into the
+  trusted graph unreviewed.
+- **The port and the pin contain the dependency's risk.** A 0.x dependency with 739
+  open issues sits on the ingestion path; the port is what makes that reversible, and
+  the pin is what makes it predictable.
+- **Upgrades are deliberate because they invalidate hashes.** A markitdown upgrade can
+  change the output of every file and so invalidate every hash, which triggers
+  corpus-wide re-extraction.
+
 ## Consequences
 
 - The parser stays single-format and deterministic, as decision 0002 requires.
