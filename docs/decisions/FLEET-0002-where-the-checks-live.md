@@ -85,6 +85,28 @@ If the file lint and the store disagree outside of a deliberate oracle compariso
 store wins and the file lint is wrong.** Everything downstream reads the store; a
 standoff between two definitions is worse than either being wrong.
 
+## Reasoning
+
+- **The file-shaped lint is the wrong shape for a store.** A lint that loads an entire
+  graph into Python to check it is the wrong shape once decisions, entities and
+  documents live in Binnacle's tables.
+- **The semantics are the expensive part, so they are what is kept.** Translating a
+  check into a recursive CTE is mechanical once you know exactly what it must do.
+  Knowing exactly what it must do was the work.
+- **A schema makes most findings unrepresentable rather than detected.** Twenty-five of
+  twenty-seven codes either vanish or become schema. Only the two staleness checks
+  are time-dependent: a citation goes stale when something else is replaced later, so
+  nothing at insert time can catch it.
+- **The sweep needs no new subsystem.** A stale-citation finding is a queue item and
+  `reviewed_against` is a queue resolution, so the two checks are a new candidate
+  query against Binnacle's existing discovery sweep.
+- **One definition must win.** Everything downstream reads the store; a standoff
+  between two definitions is worse than either being wrong.
+- **The file lint persists as a parser.** Architectural decisions are authored as
+  markdown and reviewed in a pull request, which is a better review gate for a
+  consequential ruling than a form in a UI, so pre-ingestion validation of files
+  stays.
+
 ## The narrowing and retirement conditions
 
 The file lint does two jobs, and they end at different times.

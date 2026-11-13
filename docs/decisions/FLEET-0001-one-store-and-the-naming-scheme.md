@@ -155,6 +155,29 @@ own governed acts — the two-instances-before-abstraction rule. A state machine
 you can read beats a configurable one you cannot, and this one is correct
 because it was attacked by hundreds of adversarial tests.
 
+## Reasoning
+
+- **Timing is the decisive argument.** Right now there is nothing to migrate: Binnacle
+  holds no production data, Portolan is five scaffold files, and the only consumer —
+  Meridian — is unbuilt, so breaking an API costs nothing. This is the cheapest this
+  change will ever be.
+- **The case for separation did not hold.** Both sides need the same relationship
+  vocabulary, so keeping them apart means defining it twice. The open-versus-closed
+  distinction the defence rested on did not exist: Portolan's own decision 0002
+  defines a closed set, deliberately extended.
+- **A twice-deferred question was waiting for an owner.** "What category does a
+  `decision` node belong to?" was deferred by Portolan `0002` and again by Binnacle
+  `ADR 0002`, because neither system owned the vocabulary alone.
+- **Direction matters.** Binnacle is released, tested and working, and absorbs a
+  design. The earlier rejection of a merge was substantially an argument about the
+  opposite direction — re-basing Binnacle onto an unbuilt Portolan — and it does not
+  apply here.
+- **Building separately would duplicate work, not avoid it.** It would have duplicated
+  the half already done, from migrations and pool ownership to the sweep framework
+  and the audit trail.
+- **The bridge was the symptom.** When a design's recent additions are mostly adapters
+  for a boundary, the boundary is what to question.
+
 ## Ontology scope
 
 **In scope:** typed objects, typed relationships, declared constraints, governed
